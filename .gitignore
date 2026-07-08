@@ -1,0 +1,14 @@
+# Entorno virtual del build
+.buildenv/
+venv/
+.venv/
+
+# Python
+__pycache__/
+*.pyc
+
+# macOS
+.DS_Store
+
+# Temporales de Excel
+~$*.xlsx
