@@ -12,3 +12,6 @@ __pycache__/
 
 # Temporales de Excel
 ~$*.xlsx
+
+# Config local de Claude Code
+.claude/settings.local.json

@@ -7,7 +7,7 @@
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Oswald:wght@400;500;600;700&family=Inter:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-<script src="https://cdnjs.cloudflare.com/ajax/libs/Chart.js/4.4.4/chart.umd.min.js"></script>
+<script src="vendor/chart.umd.min.js"></script>
 <style>
 :root{
   --bg:#EEF0F2;
@@ -433,10 +433,12 @@ function estadoColor(estado){
   return 'var(--muted-2)';
 }
 function utilColor(u){
-  if(u<=0) return 'var(--muted-2)';
-  if(u<0.85) return 'var(--green)';
-  if(u<=1.0) return 'var(--amber)';
-  return 'var(--red)';
+  // Hex (no var()) para que sirva tanto en CSS como en el canvas de Chart.js,
+  // que no resuelve variables CSS y las pinta de negro.
+  if(u<=0) return '#9AA3AD';  // --muted-2
+  if(u<0.85) return '#3C8C5C';  // --green
+  if(u<=1.0) return '#C9852E';  // --amber
+  return '#B0433C';  // --red
 }
 
 /* ===================== VIEW 1: PLANIFICACIÓN ===================== */
@@ -853,14 +855,24 @@ function refreshCerrado(){
 }
 
 /* ===================== NAV / INIT ===================== */
+const VIEW_REFRESH = {
+  planificacion: refreshPlanificacion,
+  proceso: refreshProceso,
+  cerrado: refreshCerrado,
+};
+
+function showView(view){
+  document.querySelectorAll('.tab-btn').forEach(b=>b.classList.toggle('active', b.dataset.view===view));
+  document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
+  document.getElementById('view-'+view).classList.add('active');
+  // Renderizar con la vista visible: Chart.js necesita que el canvas tenga tamaño
+  // (los canvas creados en un contenedor display:none quedan en 0x0 e invisibles).
+  VIEW_REFRESH[view]();
+}
+
 function initTabs(){
   document.querySelectorAll('.tab-btn').forEach(btn=>{
-    btn.addEventListener('click', ()=>{
-      document.querySelectorAll('.tab-btn').forEach(b=>b.classList.remove('active'));
-      document.querySelectorAll('.view').forEach(v=>v.classList.remove('active'));
-      btn.classList.add('active');
-      document.getElementById('view-'+btn.dataset.view).classList.add('active');
-    });
+    btn.addEventListener('click', ()=> showView(btn.dataset.view));
   });
 }
 
@@ -868,9 +880,7 @@ function init(){
   document.getElementById('metaUpdated').textContent = fmtFecha(DATA.meta.today);
   initFiltros();
   initTabs();
-  refreshPlanificacion();
-  refreshProceso();
-  refreshCerrado();
+  showView('planificacion');
 }
 init();
 </script>
