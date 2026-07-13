@@ -158,6 +158,27 @@ main{ max-width:1360px; margin:0 auto; padding:28px 32px 60px 32px; }
 }
 .gauge-pct{ font-family:var(--font-mono); font-size:13px; font-weight:600; text-align:right; }
 
+/* ---- Barras de carga (hs / turnos) ---- */
+.load-list{ display:flex; flex-direction:column; gap:12px; }
+.load-row{ display:grid; grid-template-columns:130px 1fr auto; gap:12px; align-items:center; }
+.load-row.clickable{ cursor:pointer; }
+.load-name{ font-size:13px; font-weight:600; color:var(--ink); }
+.load-track{ position:relative; height:22px; background:#F1F3F5; border-radius:4px; overflow:hidden; }
+.load-fill{ position:absolute; left:0; top:0; bottom:0; border-radius:4px; transition:width .4s ease; }
+.load-val{ font-family:var(--font-mono); font-size:12.5px; text-align:right; white-space:nowrap; color:var(--ink); }
+.load-val .turnos{ font-weight:700; }
+.load-val .sub{ color:var(--muted); font-size:11px; }
+.load-ofs{ font-size:12px; color:var(--muted); padding:2px 0 8px 142px; line-height:1.6; }
+.load-ofs .mono{ color:var(--ink); }
+
+/* ---- Chips de flujo / proceso ---- */
+.flow{ display:flex; flex-wrap:wrap; gap:3px; align-items:center; }
+.flow-step{ font-size:10.5px; padding:2px 7px; border-radius:10px; background:#EEF0F2; color:var(--muted); white-space:nowrap; }
+.flow-step.done{ background:rgba(60,140,92,.14); color:var(--green); }
+.flow-step.current{ background:var(--teal); color:#fff; font-weight:600; }
+.flow-sep{ color:var(--muted-2); font-size:10px; }
+.tag-est{ font-size:10px; color:var(--muted-2); font-style:italic; }
+
 /* ---- Semaforo grid ---- */
 .semaforo-grid{ display:grid; grid-template-columns:repeat(auto-fill, minmax(150px,1fr)); gap:10px; }
 .sem-card{ border-radius:8px; padding:12px 14px; border:1px solid var(--line); }
@@ -283,19 +304,19 @@ footer{ text-align:center; padding:24px; color:var(--muted-2); font-size:11.5px;
 
     <div class="charts-grid">
       <div class="card">
+        <h3>Carga pendiente por proceso</h3>
+        <p class="card-sub">Horas de trabajo en cola y su equivalente en turnos productivos de 7 hs</p>
+        <div class="load-list" id="cargaProcesos"></div>
+      </div>
+      <div class="card">
         <h3>Carga vs. capacidad por centro de trabajo</h3>
-        <p class="card-sub">Horas requeridas vs. horas planificables en el horizonte seleccionado</p>
+        <p class="card-sub">Horas requeridas vs. planificables en el horizonte seleccionado</p>
         <div class="gauge-list" id="gaugeCentros"></div>
         <div class="legend">
           <span><i style="background:var(--green)"></i>Disponible (&lt;85%)</span>
           <span><i style="background:var(--amber)"></i>Al límite (85–100%)</span>
           <span><i style="background:var(--red)"></i>Saturado (&gt;100%)</span>
         </div>
-      </div>
-      <div class="card">
-        <h3>Consumo de capacidad por proceso</h3>
-        <p class="card-sub">Centros agrupados por tipo de proceso productivo</p>
-        <div class="gauge-list" id="gaugeProcesos"></div>
       </div>
     </div>
 
@@ -310,11 +331,12 @@ footer{ text-align:center; padding:24px; color:var(--muted-2); font-size:11.5px;
               <th data-k="descripcion">Producto</th>
               <th data-k="familia">Familia</th>
               <th data-k="cantidad">Cant.</th>
+              <th data-k="leadHs">Lead time</th>
               <th data-k="prioridad">Prioridad</th>
               <th data-k="estado">Estado</th>
+              <th data-k="fechaCreacion">Solicitada</th>
               <th data-k="fechaRequerida">Fecha requerida</th>
               <th data-k="diasParaVencer">Días restantes</th>
-              <th data-k="responsable">Responsable</th>
             </tr>
           </thead>
           <tbody id="tablaPlanBody"></tbody>
@@ -334,7 +356,28 @@ footer{ text-align:center; padding:24px; color:var(--muted-2); font-size:11.5px;
 
     <div class="kpi-row" id="kpiProceso"></div>
 
-    <div class="charts-grid">
+    <div class="card">
+      <h3>OF activas — en proceso y por ingresar</h3>
+      <p class="card-sub">Flujo asignado, proceso actual y ETA estimados (~) · el Excel no registra avance por operación, se estima por progreso planificado</p>
+      <div class="table-wrap">
+        <table id="tablaActivas">
+          <thead>
+            <tr>
+              <th>OF / Producto</th><th>Prioridad</th><th>Estado</th><th>Flujo asignado</th><th>Proceso actual</th><th>ETA</th><th>Días restantes</th>
+            </tr>
+          </thead>
+          <tbody id="tablaActivasBody"></tbody>
+        </table>
+      </div>
+    </div>
+
+    <div class="card">
+      <h3>Carga de trabajo por proceso</h3>
+      <p class="card-sub">Horas y turnos de 7 hs de las OF activas · clic en un proceso para ver las OF que lo componen</p>
+      <div class="load-list" id="cargaProcesoActiva"></div>
+    </div>
+
+    <div class="charts-grid" style="margin-top:20px;">
       <div class="card">
         <h3>Evolución de utilización semanal</h3>
         <p class="card-sub">Últimas 12 semanas — línea punteada = objetivo (85%)</p>
@@ -344,21 +387,6 @@ footer{ text-align:center; padding:24px; color:var(--muted-2); font-size:11.5px;
         <h3>Semáforo de centros — semana actual</h3>
         <p class="card-sub">Utilización de cada centro en la semana en curso</p>
         <div class="semaforo-grid" id="semaforoGrid"></div>
-      </div>
-    </div>
-
-    <div class="card">
-      <h3>OF que requieren atención</h3>
-      <p class="card-sub">Vencidas o con vencimiento en los próximos 7 días</p>
-      <div class="table-wrap">
-        <table id="tablaAtencion">
-          <thead>
-            <tr>
-              <th>OF</th><th>Producto</th><th>Prioridad</th><th>Estado</th><th>Fecha requerida</th><th>Situación</th><th>Responsable</th>
-            </tr>
-          </thead>
-          <tbody id="tablaAtencionBody"></tbody>
-        </table>
       </div>
     </div>
   </section>
@@ -441,6 +469,57 @@ function utilColor(u){
   return '#B0433C';  // --red
 }
 
+/* ===================== ROUTING / LEAD TIME / TURNOS ===================== */
+const HS_TURNO = 7;               // horas de un turno productivo
+function turnosDe(hs){ return hs/HS_TURNO; }
+function fmtTurnos(hs){ const t=hs/HS_TURNO; return (t>=10? Math.round(t) : Math.round(t*10)/10); }
+
+// Índice OF -> operaciones del routing (ordenadas). Sale directo de cargaOF.
+const ROUTING = {};
+DATA.cargaOF.forEach(c=>{ (ROUTING[c.of] = ROUTING[c.of] || []).push(c); });
+Object.values(ROUTING).forEach(ops=>ops.sort((a,b)=>a.operacion-b.operacion));
+
+function leadTimeHs(ofId){ return (ROUTING[ofId]||[]).reduce((s,c)=>s+c.hsRequeridas,0); }
+function flujoSeq(ofId){ return (ROUTING[ofId]||[]).map(c=>c.proceso); }
+
+const PRIORIDAD_RANK = { 'Urgente':0, 'Alta':1, 'Media':2, 'Baja':3 };
+
+// --- Estimación de avance / proceso actual / ETA ---
+// El Excel NO trae avance por operación, así que se ESTIMA: se asume avance lineal
+// entre la fecha de inicio real y la fecha requerida, y ese % se mapea sobre las
+// horas acumuladas del routing para inferir en qué proceso está la OF. Todo lo que
+// sale de acá se muestra marcado con "~" (aproximado).
+function avanceEstimado(o){
+  if (o.estado !== 'En proceso' || !o.fechaInicioReal) return 0;
+  const start = new Date(o.fechaInicioReal), due = new Date(o.fechaRequerida), hoy = new Date(DATA.meta.today);
+  const span = (due - start);
+  if (span <= 0) return hoy >= due ? 1 : 0;
+  return Math.max(0, Math.min(1, (hoy - start)/span));
+}
+function procesoActualEst(o){
+  const ops = ROUTING[o.of] || [];
+  if (!ops.length) return null;
+  if (o.estado !== 'En proceso') return { proceso: 'Sin iniciar', centro:'', idx:-1 };
+  const lead = leadTimeHs(o.of);
+  const target = avanceEstimado(o) * lead;
+  let acc = 0;
+  for (let i=0;i<ops.length;i++){ acc += ops[i].hsRequeridas; if (target <= acc) return { proceso: ops[i].proceso, centro: ops[i].centro, idx:i }; }
+  const last = ops[ops.length-1];
+  return { proceso: last.proceso, centro: last.centro, idx: ops.length-1 };
+}
+function etaEst(o){
+  // No iniciada o en cola: el compromiso es la fecha requerida.
+  if (o.estado !== 'En proceso') return o.fechaRequerida;
+  // En proceso y dentro de plazo: se espera cumplir la fecha requerida.
+  if (o.diasParaVencer >= 0) return o.fechaRequerida;
+  // En proceso y vencida: hoy + horas restantes estimadas repartidas en turnos de 7h.
+  const lead = leadTimeHs(o.of);
+  const restante = (1 - avanceEstimado(o)) * lead;
+  const dias = Math.max(1, Math.ceil(restante / HS_TURNO));
+  const eta = new Date(DATA.meta.today); eta.setDate(eta.getDate() + dias);
+  return eta.toISOString().slice(0,10);
+}
+
 /* ===================== VIEW 1: PLANIFICACIÓN ===================== */
 function calcPlanificacion(horizonWeeks, f){
   const wMin = CUR_WEEK, wMax = CUR_WEEK + horizonWeeks - 1;
@@ -460,6 +539,18 @@ function calcPlanificacion(horizonWeeks, f){
   const centrosSaturados = uniq(capHorizon.filter(c=>c.estado==='Saturado').map(c=>c.centro));
   const ofUrgentes = ofPend.filter(o=>o.prioridad==='Urgente' && (o.estado==='Pendiente'||o.estado==='Liberada'));
 
+  // Carga pendiente TOTAL por proceso (cola de trabajo), en horas y turnos de 7h.
+  const byProcPend = {};
+  cargaPend.forEach(c=>{
+    const p = byProcPend[c.proceso] = byProcPend[c.proceso] || {hsReq:0, ofs:new Set()};
+    p.hsReq += c.hsRequeridas; p.ofs.add(c.of);
+  });
+  const cargaPendientePorProceso = Object.entries(byProcPend).map(([proceso,v])=>({
+    proceso, hsReq:round2(v.hsReq), turnos:fmtTurnos(v.hsReq), nOf:v.ofs.size
+  })).sort((a,b)=>b.hsReq-a.hsReq);
+  const cuello = cargaPendientePorProceso[0] || null;
+
+  // Carga vs capacidad por centro en el horizonte (gauge secundario).
   const byCentro = {};
   capHorizon.forEach(c=>{
     byCentro[c.centro] = byCentro[c.centro] || {hsReq:0, hsPlan:0, proceso:c.proceso};
@@ -470,24 +561,16 @@ function calcPlanificacion(horizonWeeks, f){
     centro, proceso:v.proceso, hsReq:round2(v.hsReq), hsPlan:v.hsPlan, util: v.hsPlan? v.hsReq/v.hsPlan : 0
   })).sort((a,b)=>b.util-a.util);
 
-  const byProc = {};
-  capHorizon.forEach(c=>{
-    byProc[c.proceso] = byProc[c.proceso] || {hsReq:0,hsPlan:0};
-    byProc[c.proceso].hsReq += c.hsRequeridas;
-    byProc[c.proceso].hsPlan += c.hsPlanificables;
-  });
-  const cargaPorProceso = Object.entries(byProc).map(([proceso,v])=>({
-    proceso, hsReq:round2(v.hsReq), hsPlan:v.hsPlan, util: v.hsPlan? v.hsReq/v.hsPlan:0
-  })).sort((a,b)=>b.util-a.util);
-
-  let tabla = ofPend.slice();
+  let tabla = ofPend.map(o=>({...o, leadHs: round2(leadTimeHs(o.of))}));
   if (f.centro) tabla = tabla.filter(o => cargaPend.some(c=>c.of===o.of));
-  tabla.sort((a,b)=> a.diasParaVencer - b.diasParaVencer);
 
   return {
     kpi: { ofActivas: ofPend.length, horasPendientes: round2(horasPendientes),
+           turnosPendientes: fmtTurnos(horasPendientes),
+           cuelloProceso: cuello? cuello.proceso : '—', cuelloTurnos: cuello? cuello.turnos : 0,
            centrosSaturados: centrosSaturados.length, ofUrgentes: ofUrgentes.length },
-    cargaPorCentro, cargaPorProceso, tabla
+    cargaPendientePorProceso,
+    cargaPorCentro, tabla
   };
 }
 
@@ -507,12 +590,12 @@ function renderGauge(container, items, nameKey, subKey){
   }).join('') || '<div class="table-empty">Sin datos para el horizonte y filtros seleccionados.</div>';
 }
 
-let sortState = {k:'diasParaVencer', dir:1};
+let sortState = {k:'fechaCreacion', dir:1};
 function renderTablaPlan(tabla){
   const sub = document.getElementById('tablaPlanSub');
-  sub.textContent = `${tabla.length} orden(es) pendiente(s) — ordenadas por fecha requerida`;
+  sub.textContent = `${tabla.length} orden(es) pendiente(s) — priorizadas por fecha de solicitud (FIFO)`;
   const body = document.getElementById('tablaPlanBody');
-  if (!tabla.length){ body.innerHTML = `<tr><td colspan="9"><div class="table-empty">No hay órdenes que coincidan con los filtros.</div></td></tr>`; return; }
+  if (!tabla.length){ body.innerHTML = `<tr><td colspan="10"><div class="table-empty">No hay órdenes que coincidan con los filtros.</div></td></tr>`; return; }
   body.innerHTML = tabla.map(o=>{
     const chipClass = 'chip-' + o.prioridad.toLowerCase();
     let diasClass = 'days-ok', diasLabel = `${o.diasParaVencer} d`;
@@ -523,11 +606,12 @@ function renderTablaPlan(tabla){
       <td>${o.descripcion}</td>
       <td>${o.familia}</td>
       <td>${o.cantidad}</td>
+      <td class="mono" title="${fmtHs(o.leadHs)} hs">${fmtTurnos(o.leadHs)} t</td>
       <td><span class="chip ${chipClass}">${o.prioridad}</span></td>
       <td>${o.estado}</td>
+      <td class="mono">${fmtFecha(o.fechaCreacion)}</td>
       <td class="mono">${fmtFecha(o.fechaRequerida)}</td>
       <td class="${diasClass}">${diasLabel}</td>
-      <td>${o.responsable}</td>
     </tr>`;
   }).join('');
 }
@@ -536,25 +620,37 @@ function renderKpiPlanificacion(k){
   const el = document.getElementById('kpiPlanificacion');
   el.innerHTML = `
     <div class="kpi-card" style="--accent:var(--teal)">
-      <p class="kpi-label">OF activas</p>
+      <p class="kpi-label">OF pendientes</p>
       <div class="kpi-value">${k.ofActivas}</div>
       <p class="kpi-sub">Pendientes, liberadas o en proceso</p>
     </div>
     <div class="kpi-card" style="--accent:var(--teal-dark)">
-      <p class="kpi-label">Horas pendientes</p>
+      <p class="kpi-label">Carga pendiente</p>
       <div class="kpi-value">${fmtHs(k.horasPendientes)}<span class="unit">hs</span></div>
-      <p class="kpi-sub">Carga total por ejecutar</p>
+      <p class="kpi-sub"><b>${fmtInt(k.turnosPendientes)}</b> turnos de 7 hs por ejecutar</p>
     </div>
-    <div class="kpi-card" style="--accent:${k.centrosSaturados>0?'var(--red)':'var(--green)'}">
-      <p class="kpi-label">Centros que se saturarán</p>
-      <div class="kpi-value">${k.centrosSaturados}</div>
-      <p class="kpi-sub ${k.centrosSaturados>0?'warn':'ok'}">${k.centrosSaturados>0?'En el horizonte seleccionado':'Ningún centro saturado'}</p>
+    <div class="kpi-card" style="--accent:var(--red)">
+      <p class="kpi-label">Proceso cuello de botella</p>
+      <div class="kpi-value" style="font-size:26px;">${k.cuelloProceso}</div>
+      <p class="kpi-sub warn"><b>${fmtInt(k.cuelloTurnos)}</b> turnos en cola</p>
     </div>
     <div class="kpi-card" style="--accent:${k.ofUrgentes>0?'var(--red)':'var(--green)'}">
       <p class="kpi-label">OF urgentes sin iniciar</p>
       <div class="kpi-value">${k.ofUrgentes}</div>
       <p class="kpi-sub ${k.ofUrgentes>0?'warn':'ok'}">Prioridad urgente, sin comenzar</p>
     </div>`;
+}
+
+function renderCargaProceso(container, items){
+  const max = items.reduce((m,i)=>Math.max(m,i.hsReq),0) || 1;
+  container.innerHTML = items.map(it=>{
+    const w = Math.max(3, it.hsReq/max*100);
+    return `<div class="load-row">
+      <div class="load-name">${it.proceso}</div>
+      <div class="load-track"><div class="load-fill" style="width:${w}%; background:var(--teal);"></div></div>
+      <div class="load-val"><span class="turnos">${fmtInt(it.turnos)} turnos</span><br><span class="sub">${fmtHs(it.hsReq)} hs · ${it.nOf} OF</span></div>
+    </div>`;
+  }).join('') || '<div class="table-empty">Sin carga pendiente para los filtros seleccionados.</div>';
 }
 
 function currentFiltros(){
@@ -571,8 +667,8 @@ function refreshPlanificacion(){
   const f = currentFiltros();
   const r = calcPlanificacion(f.horizonte, f);
   renderKpiPlanificacion(r.kpi);
+  renderCargaProceso(document.getElementById('cargaProcesos'), r.cargaPendientePorProceso);
   renderGauge(document.getElementById('gaugeCentros'), r.cargaPorCentro, 'centro', 'proceso');
-  renderGauge(document.getElementById('gaugeProcesos'), r.cargaPorProceso, 'proceso', null);
   let tabla = r.tabla.slice();
   tabla.sort((a,b)=>{
     const va=a[sortState.k], vb=b[sortState.k];
@@ -615,21 +711,49 @@ function initFiltros(){
 }
 
 /* ===================== VIEW 2: EN PROCESO ===================== */
+const ESTADO_ORDER = { 'En proceso':0, 'Liberada':1, 'Pendiente':2 };
 function calcEnProceso(){
   const of = DATA.ordenesFabricacion;
   const enProc = of.filter(o=>o.estado==='En proceso');
+  const porIngresar = of.filter(o=>o.estado==='Liberada' || o.estado==='Pendiente');
   const vencidas = of.filter(o=>o.estado!=='Terminada' && o.diasParaVencer<0);
   const enRiesgo = of.filter(o=>o.estado!=='Terminada' && o.diasParaVencer>=0 && o.diasParaVencer<=7);
-  const semActual = DATA.indicadoresSemanales.find(w=>w.semana===CUR_WEEK);
+
+  // Listado operativo de OF activas (en proceso + por ingresar) con flujo, proceso actual (~) y ETA (~)
+  const activas = [...enProc, ...porIngresar].map(o=>{
+    const pa = procesoActualEst(o);
+    return { ...o, leadHs: round2(leadTimeHs(o.of)), flujo: flujoSeq(o.of),
+             procActualIdx: pa? pa.idx : -1, procActual: pa? pa.proceso : '—', eta: etaEst(o) };
+  }).sort((a,b)=> (ESTADO_ORDER[a.estado]-ESTADO_ORDER[b.estado]) || (a.diasParaVencer-b.diasParaVencer));
+
+  // Carga de trabajo por proceso (activa) en horas/turnos + OFs que la componen
+  const activaSet = new Set([...enProc, ...porIngresar].map(o=>o.of));
+  const byProc = {};
+  DATA.cargaOF.filter(c=>c.estado!=='Terminada' && activaSet.has(c.of)).forEach(c=>{
+    const p = byProc[c.proceso] = byProc[c.proceso] || {hsReq:0, ofs:{}};
+    p.hsReq += c.hsRequeridas; p.ofs[c.of] = (p.ofs[c.of]||0) + c.hsRequeridas;
+  });
+  const cargaPorProceso = Object.entries(byProc).map(([proceso,v])=>({
+    proceso, hsReq:round2(v.hsReq), turnos:fmtTurnos(v.hsReq),
+    ofs: Object.entries(v.ofs).map(([of,hs])=>({of, hs:round2(hs)})).sort((a,b)=>b.hs-a.hs)
+  })).sort((a,b)=>b.hsReq-a.hsReq);
+
+  // Tendencia semanal (últimas 12 sem) — deduplicada por semana (las semanas de borde
+  // de mes venían dobladas en indicadoresSemanales; acá se agregan a un punto por semana).
+  const wk = {};
+  DATA.indicadoresSemanales.filter(w=>w.semana<=CUR_WEEK && w.semana>CUR_WEEK-12).forEach(w=>{
+    const g = wk[w.semana] = wk[w.semana] || {semana:w.semana, hsReq:0, hsPlan:0};
+    g.hsReq += w.hsRequeridas; g.hsPlan += w.hsPlanificables;
+  });
+  const tendencia = Object.values(wk).sort((a,b)=>a.semana-b.semana)
+    .map(g=>({semana:g.semana, utilizacionProm: g.hsPlan? g.hsReq/g.hsPlan : 0}));
+
   const capActual = DATA.capacidadSemanal.filter(c=>c.semana===CUR_WEEK);
-  const satActual = capActual.filter(c=>c.estado==='Saturado').length;
-  const last12 = DATA.indicadoresSemanales.filter(w=>w.semana<=CUR_WEEK && w.semana>CUR_WEEK-12);
   return {
-    kpi: { enProceso: enProc.length, vencidas: vencidas.length, enRiesgo: enRiesgo.length,
-           utilSemanaActual: semActual? semActual.utilizacionProm : null, satActual },
-    tendencia: last12,
-    semaforo: capActual.slice().sort((a,b)=>b.utilizacion-a.utilizacion),
-    atencion: [...vencidas, ...enRiesgo].sort((a,b)=>a.diasParaVencer-b.diasParaVencer)
+    kpi: { enProceso: enProc.length, porIngresar: porIngresar.length,
+           vencidas: vencidas.length, enRiesgo: enRiesgo.length },
+    activas, cargaPorProceso, tendencia,
+    semaforo: capActual.slice().sort((a,b)=>b.utilizacion-a.utilizacion)
   };
 }
 
@@ -648,16 +772,64 @@ function renderKpiProceso(k){
       <div class="kpi-value">${k.vencidas}</div>
       <p class="kpi-sub ${k.vencidas>0?'warn':'ok'}">Superaron la fecha requerida</p>
     </div>
+    <div class="kpi-card" style="--accent:var(--teal-dark)">
+      <p class="kpi-label">Pendientes de ingresar</p>
+      <div class="kpi-value">${k.porIngresar}</div>
+      <p class="kpi-sub">Liberadas o pendientes, sin arrancar</p>
+    </div>
     <div class="kpi-card" style="--accent:var(--amber)">
       <p class="kpi-label">OF en riesgo</p>
       <div class="kpi-value">${k.enRiesgo}</div>
       <p class="kpi-sub">Vencen en los próximos 7 días</p>
-    </div>
-    <div class="kpi-card" style="--accent:${utilColor(k.utilSemanaActual||0)}">
-      <p class="kpi-label">Utilización semana actual</p>
-      <div class="kpi-value">${k.utilSemanaActual!=null? fmtPct(k.utilSemanaActual):'—'}</div>
-      <p class="kpi-sub">${k.satActual} centro(s) saturado(s)</p>
     </div>`;
+}
+
+function flowChips(flujo, currentIdx){
+  return `<div class="flow">` + flujo.map((p,i)=>{
+    const cls = i===currentIdx ? 'current' : (currentIdx>=0 && i<currentIdx ? 'done' : '');
+    const sep = i>0 ? '<span class="flow-sep">›</span>' : '';
+    return `${sep}<span class="flow-step ${cls}">${p}</span>`;
+  }).join('') + `</div>`;
+}
+
+function renderListadoActivas(rows){
+  const body = document.getElementById('tablaActivasBody');
+  if (!rows.length){ body.innerHTML = `<tr><td colspan="7"><div class="table-empty">No hay OF activas.</div></td></tr>`; return; }
+  body.innerHTML = rows.map(o=>{
+    const chipClass = 'chip-' + o.prioridad.toLowerCase();
+    let diasClass='days-ok', diasLabel=`${o.diasParaVencer} d`;
+    if (o.diasParaVencer<0){ diasClass='days-late'; diasLabel=`${Math.abs(o.diasParaVencer)} d atraso`; }
+    else if (o.diasParaVencer<=7){ diasClass='days-soon'; }
+    const enProc = o.estado==='En proceso';
+    const proc = enProc ? `${o.procActual} <span class="tag-est">~est.</span>` : '<span style="color:var(--muted)">Sin iniciar</span>';
+    return `<tr>
+      <td class="mono">${o.of}<br><span style="color:var(--muted);font-size:11px">${o.descripcion}</span></td>
+      <td><span class="chip ${chipClass}">${o.prioridad}</span></td>
+      <td>${o.estado}</td>
+      <td>${flowChips(o.flujo, o.procActualIdx)}</td>
+      <td>${proc}</td>
+      <td class="mono">${fmtFecha(o.eta)} ${enProc?'<span class="tag-est">~</span>':''}</td>
+      <td class="${diasClass}">${diasLabel}</td>
+    </tr>`;
+  }).join('');
+}
+
+let expandProc = {};
+function renderCargaProcesoActiva(container, items){
+  const max = items.reduce((m,i)=>Math.max(m,i.hsReq),0) || 1;
+  container.innerHTML = items.map(it=>{
+    const w = Math.max(3, it.hsReq/max*100);
+    const open = expandProc[it.proceso];
+    const ofsHtml = open ? `<div class="load-ofs">${it.ofs.map(o=>`<span class="mono">${o.of}</span> (${fmtHs(o.hs)} hs)`).join(' · ')}</div>` : '';
+    return `<div class="load-row clickable" data-proc="${it.proceso}">
+      <div class="load-name">${open?'▾':'▸'} ${it.proceso}</div>
+      <div class="load-track"><div class="load-fill" style="width:${w}%; background:var(--teal);"></div></div>
+      <div class="load-val"><span class="turnos">${fmtInt(it.turnos)} turnos</span><br><span class="sub">${fmtHs(it.hsReq)} hs · ${it.ofs.length} OF</span></div>
+    </div>${ofsHtml}`;
+  }).join('') || '<div class="table-empty">Sin carga activa.</div>';
+  container.querySelectorAll('.load-row.clickable').forEach(row=>{
+    row.addEventListener('click', ()=>{ const p=row.dataset.proc; expandProc[p]=!expandProc[p]; renderCargaProcesoActiva(container, items); });
+  });
 }
 
 function renderSemaforo(rows){
@@ -671,21 +843,6 @@ function renderSemaforo(rows){
       <div class="sem-state" style="color:${color}">${r.estado}</div>
     </div>`;
   }).join('') || '<div class="table-empty">Sin datos para la semana actual.</div>';
-}
-
-function renderTablaAtencion(rows){
-  const body = document.getElementById('tablaAtencionBody');
-  if (!rows.length){ body.innerHTML = `<tr><td colspan="7"><div class="table-empty">No hay órdenes que requieran atención inmediata.</div></td></tr>`; return; }
-  body.innerHTML = rows.map(o=>{
-    const chipClass = 'chip-' + o.prioridad.toLowerCase();
-    const situ = o.diasParaVencer<0 ? `<span class="chip chip-vencida">${Math.abs(o.diasParaVencer)} d de atraso</span>` : `<span class="chip chip-riesgo">Vence en ${o.diasParaVencer} d</span>`;
-    return `<tr>
-      <td class="mono">${o.of}</td><td>${o.descripcion}</td>
-      <td><span class="chip ${chipClass}">${o.prioridad}</span></td>
-      <td>${o.estado}</td><td class="mono">${fmtFecha(o.fechaRequerida)}</td>
-      <td>${situ}</td><td>${o.responsable}</td>
-    </tr>`;
-  }).join('');
 }
 
 function renderChartUtilSemanal(rows){
@@ -712,8 +869,9 @@ function refreshProceso(){
   const r = calcEnProceso();
   document.getElementById('periodoActualLabel').textContent = `Semana ${CUR_WEEK} · ${DATA.meta.currentMonth} 2026`;
   renderKpiProceso(r.kpi);
+  renderListadoActivas(r.activas);
+  renderCargaProcesoActiva(document.getElementById('cargaProcesoActiva'), r.cargaPorProceso);
   renderSemaforo(r.semaforo);
-  renderTablaAtencion(r.atencion);
   renderChartUtilSemanal(r.tendencia);
 }
 
