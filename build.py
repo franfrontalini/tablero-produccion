@@ -220,6 +220,9 @@ def build_data(xlsx_path: Path, today: dt.date) -> "OrderedDict":
                 aTiempo=(f_fin <= f_req) if terminada else None,
                 diasAtraso=(f_fin - f_req).days if terminada else None,
                 diasParaVencer=(f_req - today).days if f_req else None,
+                # Opcional: si el Excel trae "Horas reales" por OF, habilita el contralor
+                # de costo real vs. estándar en la vista Mes Cerrado.
+                horasReales=num(row.get("Horas reales")) if row.get("Horas reales") is not None else None,
             )
         )
 

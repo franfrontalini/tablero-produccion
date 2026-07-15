@@ -403,6 +403,12 @@ footer{ text-align:center; padding:24px; color:var(--muted-2); font-size:11.5px;
     </div>
 
     <div class="card" style="margin-bottom:16px;">
+      <h3>Absorción generada por mes vs. objetivo</h3>
+      <p class="card-sub">Valor de las horas ejecutadas (por mes de finalización) vs. el costo fijo a absorber ($35.000/mes) · rojo = mes que no lo cubre</p>
+      <div style="position:relative; height:300px;"><canvas id="chartAbsorcion"></canvas></div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px;">
       <h3>Utilización por centro de trabajo y mes</h3>
       <p class="card-sub">Cómo se consumió la capacidad de cada máquina/proceso mes a mes</p>
       <div class="heatmap" id="heatmapCentros"></div>
@@ -414,10 +420,27 @@ footer{ text-align:center; padding:24px; color:var(--muted-2); font-size:11.5px;
       </div>
     </div>
 
-    <div class="card">
+    <div class="card" style="margin-bottom:16px;">
       <h3>Producción terminada por familia de producto</h3>
       <p class="card-sub">Barra = unidades entregadas · color = % de entrega a tiempo (verde 100% · ámbar ≥80% · rojo &lt;80%)</p>
       <canvas id="chartFamilia" style="max-height:340px;"></canvas>
+    </div>
+
+    <div class="card">
+      <h3>Contralor de costo por absorción — costo por pieza</h3>
+      <p class="card-sub">Costo de absorción estándar por pieza de cada producto · el costo real y el desvío se activan al cargar horas reales</p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>SKU</th><th>Producto</th><th>Familia</th><th>OF</th><th>Unidades</th>
+              <th>$/pieza estándar</th><th>$/pieza real</th><th>Desvío</th>
+            </tr>
+          </thead>
+          <tbody id="contralorCostoBody"></tbody>
+        </table>
+      </div>
+      <p class="card-sub" id="contralorNota" style="margin-top:10px;">💡 Para activar el costo real y el desvío, agregá una columna <b>Horas reales</b> por OF en la hoja 06_OF y volvé a correr <span class="mono">build.py</span>.</p>
     </div>
   </section>
 
@@ -469,6 +492,23 @@ Object.values(ROUTING).forEach(ops=>ops.sort((a,b)=>a.operacion-b.operacion));
 
 function leadTimeHs(ofId){ return (ROUTING[ofId]||[]).reduce((s,c)=>s+c.hsRequeridas,0); }
 function flujoSeq(ofId){ return (ROUTING[ofId]||[]).map(c=>c.proceso); }
+
+/* ===================== ABSORCIÓN / COSTO ===================== */
+const VALOR_HORA = {};
+DATA.centros.forEach(c=>{ VALOR_HORA[c.nombre] = c.valorHora || 0; });
+const OBJ_ABSORCION = DATA.config['Objetivo absorción mensual'] || 0;
+function fmtUSD(n){ return '$' + new Intl.NumberFormat('es-AR',{maximumFractionDigits:0}).format(Math.round(n)); }
+// Costo de absorción ESTÁNDAR de una OF = Σ (horas estándar × valor hora del centro)
+function costoAbsorcionOF(ofId){ return (ROUTING[ofId]||[]).reduce((s,c)=>s + c.hsRequeridas*(VALOR_HORA[c.centro]||0), 0); }
+// Horas reales por OF (opcional): se activa cuando el Excel trae la columna 'Horas reales'.
+// Con ese único dato el contralor estima el costo real escalando el estándar por el ratio
+// horas reales / horas estándar, y calcula el desvío. Hoy devuelve null (no hay dato).
+function horasRealesOF(o){ return (o.horasReales!=null) ? o.horasReales : null; }
+function costoRealOF(o){
+  const hr = horasRealesOF(o); if (hr==null) return null;
+  const he = leadTimeHs(o.of); if (!he) return null;
+  return costoAbsorcionOF(o.of) * (hr/he);
+}
 
 const PRIORIDAD_RANK = { 'Urgente':0, 'Alta':1, 'Media':2, 'Baja':3 };
 
@@ -522,6 +562,7 @@ function calcPlanificacion(horizonWeeks, f){
   let cargaPend = DATA.cargaOF.filter(c => c.estado !== 'Terminada' && ofSet.has(c.of));
   if (f.centro) cargaPend = cargaPend.filter(c => c.centro === f.centro);
   const horasPendientes = cargaPend.reduce((s,c)=>s+c.hsRequeridas,0);
+  const valorBacklog = cargaPend.reduce((s,c)=>s + c.hsRequeridas*(VALOR_HORA[c.centro]||0), 0);
 
   const capHorizon = DATA.capacidadSemanal.filter(c => c.semana>=wMin && c.semana<=wMax);
   const centrosSaturados = uniq(capHorizon.filter(c=>c.estado==='Saturado').map(c=>c.centro));
@@ -554,7 +595,7 @@ function calcPlanificacion(horizonWeeks, f){
 
   return {
     kpi: { ofActivas: ofPend.length, horasPendientes: round2(horasPendientes),
-           turnosPendientes: fmtTurnos(horasPendientes),
+           turnosPendientes: fmtTurnos(horasPendientes), valorBacklog,
            cuelloProceso: cuello? cuello.proceso : '—', cuelloTurnos: cuello? cuello.turnos : 0,
            centrosSaturados: centrosSaturados.length, ofUrgentes: ofUrgentes.length },
     cargaPendientePorProceso,
@@ -626,6 +667,11 @@ function renderKpiPlanificacion(k){
       <p class="kpi-label">OF urgentes sin iniciar</p>
       <div class="kpi-value">${k.ofUrgentes}</div>
       <p class="kpi-sub ${k.ofUrgentes>0?'warn':'ok'}">Prioridad urgente, sin comenzar</p>
+    </div>
+    <div class="kpi-card" style="--accent:var(--teal-dark)">
+      <p class="kpi-label">Valor del backlog</p>
+      <div class="kpi-value" style="font-size:30px;">${fmtUSD(k.valorBacklog)}</div>
+      <p class="kpi-sub">Absorción pendiente por generar</p>
     </div>`;
 }
 
@@ -733,7 +779,7 @@ function calcEnProceso(){
   };
 }
 
-let chartCumplimiento, chartUtilMensual, chartFamilia;
+let chartCumplimiento, chartUtilMensual, chartFamilia, chartAbsorcion;
 
 function renderKpiProceso(k){
   const el = document.getElementById('kpiProceso');
@@ -867,6 +913,36 @@ function calcMesCerrado(){
     familia, cantidad:v.cantidad, cumpl: v.total? v.ok/v.total : 0
   })).sort((a,b)=>b.cantidad-a.cantidad);
 
+  // Absorción generada por mes de FINALIZACIÓN real (cuándo se generó el valor)
+  const absPorMes = {};
+  ofAll.forEach(o=>{
+    if (!o.fechaFinReal) return;
+    const m = mesDe(o.fechaFinReal);
+    if (!closedSet.has(m)) return;
+    absPorMes[m] = (absPorMes[m]||0) + costoAbsorcionOF(o.of);
+  });
+  const absMensual = CLOSED.map(m=>({ mes:m, absorcion: round2(absPorMes[m]||0),
+    pct: OBJ_ABSORCION? round2((absPorMes[m]||0)/OBJ_ABSORCION*100) : 0 }));
+  const absTotal = CLOSED.reduce((s,m)=>s+(absPorMes[m]||0),0);
+  const objPeriodo = OBJ_ABSORCION*CLOSED.length;
+
+  // Contralor de costo por absorción: costo/pieza por SKU (estándar; real si hay horas reales)
+  const bySku = {};
+  ofAll.forEach(o=>{
+    if (!o.fechaFinReal || !closedSet.has(mesDe(o.fechaFinReal))) return;
+    const k = bySku[o.sku] = bySku[o.sku] || {sku:o.sku, producto:o.descripcion, familia:o.familia,
+      nOf:0, unidades:0, costoStd:0, costoReal:0, tieneReal:false};
+    k.nOf++; k.unidades += o.cantidad; k.costoStd += costoAbsorcionOF(o.of);
+    const cr = costoRealOF(o); if (cr!=null){ k.costoReal += cr; k.tieneReal = true; }
+  });
+  const contralorCosto = Object.values(bySku).map(k=>({
+    sku:k.sku, producto:k.producto, familia:k.familia, nOf:k.nOf, unidades:k.unidades,
+    costoPiezaStd: k.unidades? k.costoStd/k.unidades : 0,
+    costoPiezaReal: (k.tieneReal && k.unidades)? k.costoReal/k.unidades : null,
+    desvioPct: (k.tieneReal && k.costoStd)? (k.costoReal/k.costoStd-1)*100 : null
+  })).sort((a,b)=>b.costoPiezaStd-a.costoPiezaStd);
+  const hayReal = contralorCosto.some(c=>c.costoPiezaReal!=null);
+
   const centros = uniq(DATA.centros.filter(c=>c.planificable).map(c=>c.nombre));
   const heatMap = {};
   icClosed.forEach(h=>{ heatMap[h.mes+'|'+h.centro] = h; });
@@ -876,8 +952,9 @@ function calcMesCerrado(){
            atrasoProm: round2(atrasoProm),
            utilCritico: round2(utilCritico*10000)/100, objetivoUtil: DATA.config['Objetivo utilización recurso crítico']*100,
            eficienciaFlujo: round2(eficienciaFlujo*10000)/100,
-           produccionTotal, turnosEjecutados: Math.round(hsEjec/HS_TURNO), horasEjecutadas: Math.round(hsEjec) },
-    cumplimientoPorMes, criticoPorMes, produccionPorFamilia,
+           produccionTotal, turnosEjecutados: Math.round(hsEjec/HS_TURNO), horasEjecutadas: Math.round(hsEjec),
+           absorcionTotal: Math.round(absTotal), absorcionPct: objPeriodo? round2(absTotal/objPeriodo*100) : 0, objAbsorcionMes: OBJ_ABSORCION },
+    cumplimientoPorMes, criticoPorMes, produccionPorFamilia, absMensual, contralorCosto, hayReal,
     heat: { meses: CLOSED, centros, data: heatMap }
   };
 }
@@ -907,6 +984,11 @@ function renderKpiCerrado(k){
       <p class="kpi-label">Producción terminada</p>
       <div class="kpi-value">${fmtInt(k.produccionTotal)}<span class="unit">u.</span></div>
       <p class="kpi-sub">${fmtInt(k.turnosEjecutados)} turnos ejecutados · Ene–Jun</p>
+    </div>
+    <div class="kpi-card" style="--accent:${k.absorcionPct>=100?'var(--green)':'var(--red)'}">
+      <p class="kpi-label">Absorción generada</p>
+      <div class="kpi-value" style="font-size:30px;">${fmtUSD(k.absorcionTotal)}</div>
+      <p class="kpi-sub ${k.absorcionPct>=100?'ok':'warn'}">${fmtInt(k.absorcionPct)}% del objetivo (${fmtUSD(k.objAbsorcionMes)}/mes)</p>
     </div>`;
 }
 
@@ -970,6 +1052,48 @@ function renderChartFamilia(rows){
   });
 }
 
+function renderChartAbsorcion(rows, objMes){
+  const ctx = document.getElementById('chartAbsorcion');
+  if (chartAbsorcion) chartAbsorcion.destroy();
+  const colors = rows.map(r=> r.absorcion>=objMes ? '#3C8C5C' : '#B0433C');
+  chartAbsorcion = new Chart(ctx, {
+    data:{ labels: rows.map(r=>r.mes), datasets:[
+      { type:'bar', label:'Absorción generada', data: rows.map(r=>Math.round(r.absorcion)), backgroundColor:colors, borderRadius:4 },
+      { type:'line', label:'Objetivo mensual', data: rows.map(()=>objMes), borderColor:'#C9852E', borderDash:[6,4], pointRadius:0, borderWidth:1.5 }
+    ]},
+    options:{ responsive:true, maintainAspectRatio:false, plugins:{
+        legend:{ position:'bottom', labels:{boxWidth:12, font:{size:11}} },
+        tooltip:{ callbacks:{ label:(it)=> it.dataset.label+': '+fmtUSD(it.raw),
+          afterLabel:(it)=> it.datasetIndex===0 ? fmtInt(rows[it.dataIndex].pct)+'% del objetivo' : '' } }
+      },
+      scales:{ y:{ ticks:{ callback:v=> '$'+(v/1000)+'k' } } } }
+  });
+}
+
+function renderContralorCosto(rows, hayReal){
+  const el = document.getElementById('contralorCostoBody');
+  el.innerHTML = rows.map(r=>{
+    const real = r.costoPiezaReal!=null ? fmtUSD(r.costoPiezaReal) : '<span style="color:var(--muted-2)">—</span>';
+    let desvio = '<span style="color:var(--muted-2)">—</span>';
+    if (r.desvioPct!=null){
+      const cls = r.desvioPct>5 ? 'days-late' : (r.desvioPct< -5 ? 'days-ok' : '');
+      desvio = `<span class="${cls}">${r.desvioPct>0?'+':''}${fmtInt(r.desvioPct)}%</span>`;
+    }
+    return `<tr>
+      <td class="mono">${r.sku}</td>
+      <td>${r.producto}</td>
+      <td>${r.familia}</td>
+      <td class="mono">${r.nOf}</td>
+      <td class="mono">${fmtInt(r.unidades)}</td>
+      <td class="mono">${fmtUSD(r.costoPiezaStd)}</td>
+      <td class="mono">${real}</td>
+      <td class="mono">${desvio}</td>
+    </tr>`;
+  }).join('');
+  const nota = document.getElementById('contralorNota');
+  if (nota) nota.style.display = hayReal ? 'none' : '';
+}
+
 function renderHeatmap(heat){
   const el = document.getElementById('heatmapCentros');
   let html = '<table><thead><tr><th></th>' + heat.meses.map(m=>`<th>${m}</th>`).join('') + '</tr></thead><tbody>';
@@ -992,7 +1116,9 @@ function refreshCerrado(){
   renderKpiCerrado(r.kpi);
   renderChartCumplimiento(r.cumplimientoPorMes);
   renderChartUtilCritico(r.criticoPorMes);
+  renderChartAbsorcion(r.absMensual, r.kpi.objAbsorcionMes);
   renderChartFamilia(r.produccionPorFamilia);
+  renderContralorCosto(r.contralorCosto, r.hayReal);
   renderHeatmap(r.heat);
 }
 
