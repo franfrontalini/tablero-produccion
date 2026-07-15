@@ -257,6 +257,7 @@ footer{ text-align:center; padding:24px; color:var(--muted-2); font-size:11.5px;
     <button class="tab-btn active" data-view="planificacion"><span class="tab-num">01</span>Planificación</button>
     <button class="tab-btn" data-view="proceso"><span class="tab-num">02</span>En Proceso</button>
     <button class="tab-btn" data-view="cerrado"><span class="tab-num">03</span>Mes Cerrado</button>
+    <button class="tab-btn" data-view="economico"><span class="tab-num">04</span>Datos Económicos</button>
   </div>
 </div>
 
@@ -403,12 +404,6 @@ footer{ text-align:center; padding:24px; color:var(--muted-2); font-size:11.5px;
     </div>
 
     <div class="card" style="margin-bottom:16px;">
-      <h3>Absorción generada por mes vs. objetivo</h3>
-      <p class="card-sub">Valor de las horas ejecutadas (por mes de finalización) vs. el costo fijo a absorber ($35.000/mes) · rojo = mes que no lo cubre</p>
-      <div style="position:relative; height:300px;"><canvas id="chartAbsorcion"></canvas></div>
-    </div>
-
-    <div class="card" style="margin-bottom:16px;">
       <h3>Utilización por centro de trabajo y mes</h3>
       <p class="card-sub">Cómo se consumió la capacidad de cada máquina/proceso mes a mes</p>
       <div class="heatmap" id="heatmapCentros"></div>
@@ -420,10 +415,34 @@ footer{ text-align:center; padding:24px; color:var(--muted-2); font-size:11.5px;
       </div>
     </div>
 
-    <div class="card" style="margin-bottom:16px;">
+    <div class="card">
       <h3>Producción terminada por familia de producto</h3>
       <p class="card-sub">Barra = unidades entregadas · color = % de entrega a tiempo (verde 100% · ámbar ≥80% · rojo &lt;80%)</p>
       <canvas id="chartFamilia" style="max-height:340px;"></canvas>
+    </div>
+  </section>
+
+  <!-- ============ VIEW 4: DATOS ECONÓMICOS ============ -->
+  <section class="view" id="view-economico">
+    <div class="view-heading">
+      <div>
+        <h2>Datos económicos — absorción de costos</h2>
+        <p>Cómo el valor de las horas trabajadas cubre el costo fijo a absorber ($35.000/mes)</p>
+      </div>
+    </div>
+
+    <div class="kpi-row" id="kpiEconomico"></div>
+
+    <div class="card" style="margin-bottom:16px;">
+      <h3>Absorción generada por mes vs. objetivo</h3>
+      <p class="card-sub">Valor de las horas ejecutadas (por mes de finalización) vs. el costo fijo a absorber ($35.000/mes) · rojo = mes que no lo cubre</p>
+      <div style="position:relative; height:300px;"><canvas id="chartAbsorcion"></canvas></div>
+    </div>
+
+    <div class="card" style="margin-bottom:16px;">
+      <h3>Dónde se genera la absorción — por proceso</h3>
+      <p class="card-sub">Valor absorbido por cada proceso en el período (horas ejecutadas × valor hora del centro)</p>
+      <div class="load-list" id="absorcionProceso"></div>
     </div>
 
     <div class="card">
@@ -667,11 +686,6 @@ function renderKpiPlanificacion(k){
       <p class="kpi-label">OF urgentes sin iniciar</p>
       <div class="kpi-value">${k.ofUrgentes}</div>
       <p class="kpi-sub ${k.ofUrgentes>0?'warn':'ok'}">Prioridad urgente, sin comenzar</p>
-    </div>
-    <div class="kpi-card" style="--accent:var(--teal-dark)">
-      <p class="kpi-label">Valor del backlog</p>
-      <div class="kpi-value" style="font-size:30px;">${fmtUSD(k.valorBacklog)}</div>
-      <p class="kpi-sub">Absorción pendiente por generar</p>
     </div>`;
 }
 
@@ -913,36 +927,6 @@ function calcMesCerrado(){
     familia, cantidad:v.cantidad, cumpl: v.total? v.ok/v.total : 0
   })).sort((a,b)=>b.cantidad-a.cantidad);
 
-  // Absorción generada por mes de FINALIZACIÓN real (cuándo se generó el valor)
-  const absPorMes = {};
-  ofAll.forEach(o=>{
-    if (!o.fechaFinReal) return;
-    const m = mesDe(o.fechaFinReal);
-    if (!closedSet.has(m)) return;
-    absPorMes[m] = (absPorMes[m]||0) + costoAbsorcionOF(o.of);
-  });
-  const absMensual = CLOSED.map(m=>({ mes:m, absorcion: round2(absPorMes[m]||0),
-    pct: OBJ_ABSORCION? round2((absPorMes[m]||0)/OBJ_ABSORCION*100) : 0 }));
-  const absTotal = CLOSED.reduce((s,m)=>s+(absPorMes[m]||0),0);
-  const objPeriodo = OBJ_ABSORCION*CLOSED.length;
-
-  // Contralor de costo por absorción: costo/pieza por SKU (estándar; real si hay horas reales)
-  const bySku = {};
-  ofAll.forEach(o=>{
-    if (!o.fechaFinReal || !closedSet.has(mesDe(o.fechaFinReal))) return;
-    const k = bySku[o.sku] = bySku[o.sku] || {sku:o.sku, producto:o.descripcion, familia:o.familia,
-      nOf:0, unidades:0, costoStd:0, costoReal:0, tieneReal:false};
-    k.nOf++; k.unidades += o.cantidad; k.costoStd += costoAbsorcionOF(o.of);
-    const cr = costoRealOF(o); if (cr!=null){ k.costoReal += cr; k.tieneReal = true; }
-  });
-  const contralorCosto = Object.values(bySku).map(k=>({
-    sku:k.sku, producto:k.producto, familia:k.familia, nOf:k.nOf, unidades:k.unidades,
-    costoPiezaStd: k.unidades? k.costoStd/k.unidades : 0,
-    costoPiezaReal: (k.tieneReal && k.unidades)? k.costoReal/k.unidades : null,
-    desvioPct: (k.tieneReal && k.costoStd)? (k.costoReal/k.costoStd-1)*100 : null
-  })).sort((a,b)=>b.costoPiezaStd-a.costoPiezaStd);
-  const hayReal = contralorCosto.some(c=>c.costoPiezaReal!=null);
-
   const centros = uniq(DATA.centros.filter(c=>c.planificable).map(c=>c.nombre));
   const heatMap = {};
   icClosed.forEach(h=>{ heatMap[h.mes+'|'+h.centro] = h; });
@@ -952,9 +936,8 @@ function calcMesCerrado(){
            atrasoProm: round2(atrasoProm),
            utilCritico: round2(utilCritico*10000)/100, objetivoUtil: DATA.config['Objetivo utilización recurso crítico']*100,
            eficienciaFlujo: round2(eficienciaFlujo*10000)/100,
-           produccionTotal, turnosEjecutados: Math.round(hsEjec/HS_TURNO), horasEjecutadas: Math.round(hsEjec),
-           absorcionTotal: Math.round(absTotal), absorcionPct: objPeriodo? round2(absTotal/objPeriodo*100) : 0, objAbsorcionMes: OBJ_ABSORCION },
-    cumplimientoPorMes, criticoPorMes, produccionPorFamilia, absMensual, contralorCosto, hayReal,
+           produccionTotal, turnosEjecutados: Math.round(hsEjec/HS_TURNO), horasEjecutadas: Math.round(hsEjec) },
+    cumplimientoPorMes, criticoPorMes, produccionPorFamilia,
     heat: { meses: CLOSED, centros, data: heatMap }
   };
 }
@@ -984,11 +967,6 @@ function renderKpiCerrado(k){
       <p class="kpi-label">Producción terminada</p>
       <div class="kpi-value">${fmtInt(k.produccionTotal)}<span class="unit">u.</span></div>
       <p class="kpi-sub">${fmtInt(k.turnosEjecutados)} turnos ejecutados · Ene–Jun</p>
-    </div>
-    <div class="kpi-card" style="--accent:${k.absorcionPct>=100?'var(--green)':'var(--red)'}">
-      <p class="kpi-label">Absorción generada</p>
-      <div class="kpi-value" style="font-size:30px;">${fmtUSD(k.absorcionTotal)}</div>
-      <p class="kpi-sub ${k.absorcionPct>=100?'ok':'warn'}">${fmtInt(k.absorcionPct)}% del objetivo (${fmtUSD(k.objAbsorcionMes)}/mes)</p>
     </div>`;
 }
 
@@ -1116,10 +1094,114 @@ function refreshCerrado(){
   renderKpiCerrado(r.kpi);
   renderChartCumplimiento(r.cumplimientoPorMes);
   renderChartUtilCritico(r.criticoPorMes);
-  renderChartAbsorcion(r.absMensual, r.kpi.objAbsorcionMes);
   renderChartFamilia(r.produccionPorFamilia);
-  renderContralorCosto(r.contralorCosto, r.hayReal);
   renderHeatmap(r.heat);
+}
+
+/* ===================== VIEW 4: DATOS ECONÓMICOS ===================== */
+function calcEconomico(){
+  const closedSet = new Set(CLOSED);
+  const ofAll = DATA.ordenesFabricacion;
+
+  // OF terminadas con finalización real dentro de los meses cerrados
+  const okSet = new Set();
+  const absPorMes = {};
+  ofAll.forEach(o=>{
+    if (o.estado!=='Terminada' || !o.fechaFinReal) return;
+    const m = mesDe(o.fechaFinReal);
+    if (!closedSet.has(m)) return;
+    okSet.add(o.of);
+    absPorMes[m] = (absPorMes[m]||0) + costoAbsorcionOF(o.of);
+  });
+  const absMensual = CLOSED.map(m=>({ mes:m, absorcion: round2(absPorMes[m]||0),
+    pct: OBJ_ABSORCION? round2((absPorMes[m]||0)/OBJ_ABSORCION*100) : 0 }));
+  const absTotal = CLOSED.reduce((s,m)=>s+(absPorMes[m]||0),0);
+  const objPeriodo = OBJ_ABSORCION*CLOSED.length;
+  const mesesBajo = absMensual.filter(m=>m.absorcion<OBJ_ABSORCION).length;
+
+  // Valor del backlog: absorción pendiente (todo lo no terminado)
+  const valorBacklog = DATA.cargaOF.filter(c=>c.estado!=='Terminada')
+    .reduce((s,c)=>s + c.hsRequeridas*(VALOR_HORA[c.centro]||0), 0);
+
+  // Absorción generada por proceso (dónde se genera el valor)
+  const byProc = {};
+  DATA.cargaOF.forEach(c=>{
+    if (!okSet.has(c.of)) return;
+    byProc[c.proceso] = (byProc[c.proceso]||0) + c.hsRequeridas*(VALOR_HORA[c.centro]||0);
+  });
+  const absorcionPorProceso = Object.entries(byProc).map(([proceso,valor])=>({proceso, valor:round2(valor)}))
+    .filter(x=>x.valor>0).sort((a,b)=>b.valor-a.valor);
+
+  // Contralor de costo por absorción: costo/pieza por SKU (estándar; real si hay horas reales)
+  const bySku = {};
+  ofAll.forEach(o=>{
+    if (!okSet.has(o.of)) return;
+    const k = bySku[o.sku] = bySku[o.sku] || {sku:o.sku, producto:o.descripcion, familia:o.familia,
+      nOf:0, unidades:0, costoStd:0, costoReal:0, tieneReal:false};
+    k.nOf++; k.unidades += o.cantidad; k.costoStd += costoAbsorcionOF(o.of);
+    const cr = costoRealOF(o); if (cr!=null){ k.costoReal += cr; k.tieneReal = true; }
+  });
+  const contralorCosto = Object.values(bySku).map(k=>({
+    sku:k.sku, producto:k.producto, familia:k.familia, nOf:k.nOf, unidades:k.unidades,
+    costoPiezaStd: k.unidades? k.costoStd/k.unidades : 0,
+    costoPiezaReal: (k.tieneReal && k.unidades)? k.costoReal/k.unidades : null,
+    desvioPct: (k.tieneReal && k.costoStd)? (k.costoReal/k.costoStd-1)*100 : null
+  })).sort((a,b)=>b.costoPiezaStd-a.costoPiezaStd);
+  const hayReal = contralorCosto.some(c=>c.costoPiezaReal!=null);
+
+  return {
+    kpi: { absorcionTotal: Math.round(absTotal), absorcionPct: objPeriodo? round2(absTotal/objPeriodo*100):0,
+           objAbsorcionMes: OBJ_ABSORCION, sobreAbsorcion: Math.round(absTotal-objPeriodo),
+           valorBacklog: Math.round(valorBacklog), mesesBajo, totalMeses: CLOSED.length },
+    absMensual, absorcionPorProceso, contralorCosto, hayReal
+  };
+}
+
+function renderKpiEconomico(k){
+  const el = document.getElementById('kpiEconomico');
+  const absOk = k.absorcionPct>=100;
+  const sobre = k.sobreAbsorcion>=0;
+  el.innerHTML = `
+    <div class="kpi-card" style="--accent:${absOk?'var(--green)':'var(--red)'}">
+      <p class="kpi-label">Absorción generada</p>
+      <div class="kpi-value" style="font-size:30px;">${fmtUSD(k.absorcionTotal)}</div>
+      <p class="kpi-sub ${absOk?'ok':'warn'}">${fmtInt(k.absorcionPct)}% del objetivo del período</p>
+    </div>
+    <div class="kpi-card" style="--accent:${sobre?'var(--green)':'var(--red)'}">
+      <p class="kpi-label">${sobre?'Sobre-absorción':'Sub-absorción'}</p>
+      <div class="kpi-value" style="font-size:30px;">${sobre?'+':'−'}${fmtUSD(Math.abs(k.sobreAbsorcion))}</div>
+      <p class="kpi-sub">vs. objetivo ${fmtUSD(k.objAbsorcionMes*k.totalMeses)} (${fmtUSD(k.objAbsorcionMes)}×${k.totalMeses})</p>
+    </div>
+    <div class="kpi-card" style="--accent:${k.mesesBajo>0?'var(--amber)':'var(--green)'}">
+      <p class="kpi-label">Meses bajo objetivo</p>
+      <div class="kpi-value">${k.mesesBajo}<span class="unit">/ ${k.totalMeses}</span></div>
+      <p class="kpi-sub ${k.mesesBajo>0?'warn':'ok'}">No cubrieron el costo fijo</p>
+    </div>
+    <div class="kpi-card" style="--accent:var(--teal-dark)">
+      <p class="kpi-label">Valor del backlog</p>
+      <div class="kpi-value" style="font-size:30px;">${fmtUSD(k.valorBacklog)}</div>
+      <p class="kpi-sub">Absorción pendiente por generar</p>
+    </div>`;
+}
+
+function renderAbsorcionProceso(container, items){
+  const max = items.reduce((m,i)=>Math.max(m,i.valor),0) || 1;
+  container.innerHTML = items.map(it=>{
+    const w = Math.max(3, it.valor/max*100);
+    return `<div class="load-row">
+      <div class="load-name">${it.proceso}</div>
+      <div class="load-track"><div class="load-fill" style="width:${w}%; background:var(--teal);"></div></div>
+      <div class="load-val"><span class="turnos">${fmtUSD(it.valor)}</span></div>
+    </div>`;
+  }).join('') || '<div class="table-empty">Sin datos.</div>';
+}
+
+function refreshEconomico(){
+  const r = calcEconomico();
+  renderKpiEconomico(r.kpi);
+  renderChartAbsorcion(r.absMensual, r.kpi.objAbsorcionMes);
+  renderAbsorcionProceso(document.getElementById('absorcionProceso'), r.absorcionPorProceso);
+  renderContralorCosto(r.contralorCosto, r.hayReal);
 }
 
 /* ===================== NAV / INIT ===================== */
@@ -1127,6 +1209,7 @@ const VIEW_REFRESH = {
   planificacion: refreshPlanificacion,
   proceso: refreshProceso,
   cerrado: refreshCerrado,
+  economico: refreshEconomico,
 };
 
 function showView(view){
