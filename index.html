@@ -376,19 +376,6 @@ footer{ text-align:center; padding:24px; color:var(--muted-2); font-size:11.5px;
       <p class="card-sub">Horas y turnos de 7 hs de las OF activas · clic en un proceso para ver las OF que lo componen</p>
       <div class="load-list" id="cargaProcesoActiva"></div>
     </div>
-
-    <div class="charts-grid" style="margin-top:20px;">
-      <div class="card">
-        <h3>Evolución de utilización semanal</h3>
-        <p class="card-sub">Últimas 12 semanas — línea punteada = objetivo (85%)</p>
-        <canvas id="chartUtilSemanal"></canvas>
-      </div>
-      <div class="card">
-        <h3>Semáforo de centros — semana actual</h3>
-        <p class="card-sub">Utilización de cada centro en la semana en curso</p>
-        <div class="semaforo-grid" id="semaforoGrid"></div>
-      </div>
-    </div>
   </section>
 
   <!-- ============ VIEW 3: MES CERRADO ============ -->
@@ -405,12 +392,12 @@ footer{ text-align:center; padding:24px; color:var(--muted-2); font-size:11.5px;
     <div class="charts-grid">
       <div class="card">
         <h3>Cumplimiento de entrega por mes</h3>
-        <p class="card-sub">OF terminadas: a tiempo vs. con atraso</p>
+        <p class="card-sub">Barras = OF a tiempo / con atraso · línea = % a tiempo vs. objetivo 95%</p>
         <canvas id="chartCumplimiento"></canvas>
       </div>
       <div class="card">
-        <h3>Utilización mensual promedio</h3>
-        <p class="card-sub">Real vs. objetivo (85%)</p>
+        <h3>Utilización del recurso crítico</h3>
+        <p class="card-sub">Centro más cargado de cada mes vs. objetivo (85%)</p>
         <canvas id="chartUtilMensual"></canvas>
       </div>
     </div>
@@ -429,7 +416,7 @@ footer{ text-align:center; padding:24px; color:var(--muted-2); font-size:11.5px;
 
     <div class="card">
       <h3>Producción terminada por familia de producto</h3>
-      <p class="card-sub">Unidades entregadas, Enero–Junio 2026</p>
+      <p class="card-sub">Barra = unidades entregadas · color = % de entrega a tiempo (verde 100% · ámbar ≥80% · rojo &lt;80%)</p>
       <canvas id="chartFamilia" style="max-height:340px;"></canvas>
     </div>
   </section>
@@ -454,6 +441,7 @@ function mesDe(fechaISO){
   const meses = ['Enero','Febrero','Marzo','Abril','Mayo','Junio','Julio','Agosto','Septiembre','Octubre','Noviembre','Diciembre'];
   return meses[parseInt(fechaISO.split('-')[1],10)-1];
 }
+function diasEntre(isoA, isoB){ return Math.round((new Date(isoB) - new Date(isoA)) / 86400000); }
 function estadoColor(estado){
   if(estado==='Saturado') return 'var(--red)';
   if(estado==='Al límite') return 'var(--amber)';
@@ -738,26 +726,14 @@ function calcEnProceso(){
     ofs: Object.entries(v.ofs).map(([of,hs])=>({of, hs:round2(hs)})).sort((a,b)=>b.hs-a.hs)
   })).sort((a,b)=>b.hsReq-a.hsReq);
 
-  // Tendencia semanal (últimas 12 sem) — deduplicada por semana (las semanas de borde
-  // de mes venían dobladas en indicadoresSemanales; acá se agregan a un punto por semana).
-  const wk = {};
-  DATA.indicadoresSemanales.filter(w=>w.semana<=CUR_WEEK && w.semana>CUR_WEEK-12).forEach(w=>{
-    const g = wk[w.semana] = wk[w.semana] || {semana:w.semana, hsReq:0, hsPlan:0};
-    g.hsReq += w.hsRequeridas; g.hsPlan += w.hsPlanificables;
-  });
-  const tendencia = Object.values(wk).sort((a,b)=>a.semana-b.semana)
-    .map(g=>({semana:g.semana, utilizacionProm: g.hsPlan? g.hsReq/g.hsPlan : 0}));
-
-  const capActual = DATA.capacidadSemanal.filter(c=>c.semana===CUR_WEEK);
   return {
     kpi: { enProceso: enProc.length, porIngresar: porIngresar.length,
            vencidas: vencidas.length, enRiesgo: enRiesgo.length },
-    activas, cargaPorProceso, tendencia,
-    semaforo: capActual.slice().sort((a,b)=>b.utilizacion-a.utilizacion)
+    activas, cargaPorProceso
   };
 }
 
-let chartUtilSemanal, chartCumplimiento, chartUtilMensual, chartFamilia;
+let chartCumplimiento, chartUtilMensual, chartFamilia;
 
 function renderKpiProceso(k){
   const el = document.getElementById('kpiProceso');
@@ -832,47 +808,12 @@ function renderCargaProcesoActiva(container, items){
   });
 }
 
-function renderSemaforo(rows){
-  const grid = document.getElementById('semaforoGrid');
-  grid.innerHTML = rows.map(r=>{
-    const color = estadoColor(r.estado);
-    return `<div class="sem-card" style="border-left:4px solid ${color}">
-      <div class="sem-name">${r.centro}</div>
-      <div class="sem-proc">${r.proceso}</div>
-      <div class="sem-pct" style="color:${color}">${fmtPct(r.utilizacion)}</div>
-      <div class="sem-state" style="color:${color}">${r.estado}</div>
-    </div>`;
-  }).join('') || '<div class="table-empty">Sin datos para la semana actual.</div>';
-}
-
-function renderChartUtilSemanal(rows){
-  const ctx = document.getElementById('chartUtilSemanal');
-  const labels = rows.map(r=>'S'+r.semana);
-  const values = rows.map(r=>round2(r.utilizacionProm*100));
-  const highlightIdx = rows.findIndex(r=>r.semana===CUR_WEEK);
-  const pointColors = rows.map((r,i)=> i===highlightIdx ? '#B0433C' : '#2E6F86');
-  const pointRadius = rows.map((r,i)=> i===highlightIdx ? 6 : 3);
-  if (chartUtilSemanal) chartUtilSemanal.destroy();
-  chartUtilSemanal = new Chart(ctx, {
-    type:'line',
-    data:{ labels, datasets:[
-      { label:'Utilización (%)', data: values, borderColor:'#2E6F86', backgroundColor:'rgba(46,111,134,.08)',
-        fill:true, tension:.25, pointBackgroundColor: pointColors, pointRadius: pointRadius, pointHoverRadius:7 },
-      { label:'Objetivo 85%', data: rows.map(()=>85), borderColor:'#C9852E', borderDash:[6,4], pointRadius:0, borderWidth:1.5 }
-    ]},
-    options:{ responsive:true, plugins:{ legend:{ position:'bottom', labels:{ boxWidth:12, font:{size:11} } } },
-      scales:{ y:{ ticks:{ callback:v=>v+'%' } } } }
-  });
-}
-
 function refreshProceso(){
   const r = calcEnProceso();
   document.getElementById('periodoActualLabel').textContent = `Semana ${CUR_WEEK} · ${DATA.meta.currentMonth} 2026`;
   renderKpiProceso(r.kpi);
   renderListadoActivas(r.activas);
   renderCargaProcesoActiva(document.getElementById('cargaProcesoActiva'), r.cargaPorProceso);
-  renderSemaforo(r.semaforo);
-  renderChartUtilSemanal(r.tendencia);
 }
 
 /* ===================== VIEW 3: MES CERRADO ===================== */
@@ -882,10 +823,28 @@ function calcMesCerrado(){
   const ofClosed = ofAll.filter(o => closedSet.has(mesDe(o.fechaRequerida)));
   const aTiempo = ofClosed.filter(o=>o.aTiempo).length;
   const cumplimiento = ofClosed.length? aTiempo/ofClosed.length : 0;
-  const indM = DATA.indicadoresMensuales.filter(m=>closedSet.has(m.mes))
-    .sort((a,b)=>CLOSED.indexOf(a.mes)-CLOSED.indexOf(b.mes));
-  const utilProm = indM.length? indM.reduce((s,m)=>s+m.utilizacionProm,0)/indM.length : 0;
-  const mesesSaturados = indM.filter(m=>m.semanasSaturadas>0).length;
+
+  // Atraso promedio de las OF tardías
+  const tardias = ofClosed.filter(o=>!o.aTiempo && o.diasAtraso!=null);
+  const atrasoProm = tardias.length? tardias.reduce((s,o)=>s+o.diasAtraso,0)/tardias.length : 0;
+
+  // Recurso crítico por mes: el centro más cargado de cada mes (no el promedio de planta)
+  const icClosed = DATA.indicadoresCentros.filter(c=>closedSet.has(c.mes));
+  const critByMes = {};
+  icClosed.forEach(c=>{ const cur=critByMes[c.mes]; if(!cur || c.utilizacion>cur.utilizacion) critByMes[c.mes]=c; });
+  const criticoPorMes = CLOSED.map(m=>({mes:m, centro: critByMes[m]?critByMes[m].centro:'—', util: critByMes[m]?critByMes[m].utilizacion:0}));
+  const utilCritico = criticoPorMes.length? criticoPorMes.reduce((s,x)=>s+x.util,0)/criticoPorMes.length : 0;
+
+  // Producción ejecutada (horas/turnos de proceso) y eficiencia de flujo
+  let hsEjec=0, sumEf=0, nEf=0;
+  ofClosed.forEach(o=>{
+    hsEjec += leadTimeHs(o.of);
+    if (o.fechaInicioReal && o.fechaFinReal){
+      const dc = diasEntre(o.fechaInicioReal, o.fechaFinReal);
+      if (dc>0){ sumEf += leadTimeHs(o.of)/(dc*HS_TURNO); nEf++; }
+    }
+  });
+  const eficienciaFlujo = nEf? sumEf/nEf : 0;
   const produccionTotal = ofClosed.reduce((s,o)=>s+o.cantidad,0);
 
   const porMes = {};
@@ -894,23 +853,31 @@ function calcMesCerrado(){
     porMes[m] = porMes[m] || {aTiempo:0, tarde:0};
     if (o.aTiempo) porMes[m].aTiempo++; else porMes[m].tarde++;
   });
-  const cumplimientoPorMes = CLOSED.map(m=>({mes:m, ...(porMes[m]||{aTiempo:0,tarde:0})}));
+  const cumplimientoPorMes = CLOSED.map(m=>{
+    const p = porMes[m] || {aTiempo:0, tarde:0}; const tot = p.aTiempo+p.tarde;
+    return {mes:m, aTiempo:p.aTiempo, tarde:p.tarde, pct: tot? round2(p.aTiempo/tot*100) : null};
+  });
 
   const porFamilia = {};
-  ofClosed.forEach(o=>{ porFamilia[o.familia] = (porFamilia[o.familia]||0) + o.cantidad; });
-  const produccionPorFamilia = Object.entries(porFamilia).map(([familia,cantidad])=>({familia,cantidad}))
-    .sort((a,b)=>b.cantidad-a.cantidad);
+  ofClosed.forEach(o=>{
+    const f = porFamilia[o.familia] = porFamilia[o.familia] || {cantidad:0, total:0, ok:0};
+    f.cantidad += o.cantidad; f.total++; if (o.aTiempo) f.ok++;
+  });
+  const produccionPorFamilia = Object.entries(porFamilia).map(([familia,v])=>({
+    familia, cantidad:v.cantidad, cumpl: v.total? v.ok/v.total : 0
+  })).sort((a,b)=>b.cantidad-a.cantidad);
 
   const centros = uniq(DATA.centros.filter(c=>c.planificable).map(c=>c.nombre));
-  const heat = DATA.indicadoresCentros.filter(c=>closedSet.has(c.mes));
   const heatMap = {};
-  heat.forEach(h=>{ heatMap[h.mes+'|'+h.centro] = h; });
+  icClosed.forEach(h=>{ heatMap[h.mes+'|'+h.centro] = h; });
 
   return {
     kpi: { cumplimiento: round2(cumplimiento*10000)/100, objetivoCumplimiento: DATA.config['Objetivo cumplimiento entrega']*100,
-           utilProm: round2(utilProm*10000)/100, objetivoUtil: DATA.config['Objetivo utilización recurso crítico']*100,
-           mesesSaturados, produccionTotal, totalMeses: indM.length },
-    cumplimientoPorMes, indicadoresMensuales: indM, produccionPorFamilia,
+           atrasoProm: round2(atrasoProm),
+           utilCritico: round2(utilCritico*10000)/100, objetivoUtil: DATA.config['Objetivo utilización recurso crítico']*100,
+           eficienciaFlujo: round2(eficienciaFlujo*10000)/100,
+           produccionTotal, turnosEjecutados: Math.round(hsEjec/HS_TURNO), horasEjecutadas: Math.round(hsEjec) },
+    cumplimientoPorMes, criticoPorMes, produccionPorFamilia,
     heat: { meses: CLOSED, centros, data: heatMap }
   };
 }
@@ -918,27 +885,28 @@ function calcMesCerrado(){
 function renderKpiCerrado(k){
   const el = document.getElementById('kpiCerrado');
   const cumpOk = k.cumplimiento >= k.objetivoCumplimiento;
-  const utilOver = k.utilProm > k.objetivoUtil;
+  const critColor = k.utilCritico>100 ? 'var(--red)' : (k.utilCritico>k.objetivoUtil ? 'var(--amber)' : 'var(--green)');
+  const efColor = k.eficienciaFlujo>=70 ? 'var(--green)' : (k.eficienciaFlujo>=50 ? 'var(--amber)' : 'var(--red)');
   el.innerHTML = `
     <div class="kpi-card" style="--accent:${cumpOk?'var(--green)':'var(--red)'}">
       <p class="kpi-label">Cumplimiento de entrega</p>
       <div class="kpi-value">${k.cumplimiento.toFixed(1)}<span class="unit">%</span></div>
-      <p class="kpi-sub ${cumpOk?'ok':'warn'}">Objetivo: ${k.objetivoCumplimiento.toFixed(0)}%</p>
+      <p class="kpi-sub ${cumpOk?'ok':'warn'}">Objetivo ${k.objetivoCumplimiento.toFixed(0)}% · atraso prom. ${fmtInt(k.atrasoProm)} d</p>
     </div>
-    <div class="kpi-card" style="--accent:${utilOver?'var(--amber)':'var(--green)'}">
-      <p class="kpi-label">Utilización promedio</p>
-      <div class="kpi-value">${k.utilProm.toFixed(1)}<span class="unit">%</span></div>
-      <p class="kpi-sub ${utilOver?'warn':'ok'}">Objetivo: ${k.objetivoUtil.toFixed(0)}%</p>
+    <div class="kpi-card" style="--accent:${critColor}">
+      <p class="kpi-label">Utilización recurso crítico</p>
+      <div class="kpi-value">${fmtInt(k.utilCritico)}<span class="unit">%</span></div>
+      <p class="kpi-sub warn">Centro más cargado · objetivo ${k.objetivoUtil.toFixed(0)}%</p>
     </div>
-    <div class="kpi-card" style="--accent:var(--amber)">
-      <p class="kpi-label">Meses con saturación</p>
-      <div class="kpi-value">${k.mesesSaturados}<span class="unit">/ ${k.totalMeses}</span></div>
-      <p class="kpi-sub">Con al menos una semana saturada</p>
+    <div class="kpi-card" style="--accent:${efColor}">
+      <p class="kpi-label">Eficiencia de flujo</p>
+      <div class="kpi-value">${k.eficienciaFlujo.toFixed(1)}<span class="unit">%</span></div>
+      <p class="kpi-sub">Tiempo en proceso vs. en planta (resto = cola)</p>
     </div>
     <div class="kpi-card" style="--accent:var(--teal)">
       <p class="kpi-label">Producción terminada</p>
       <div class="kpi-value">${fmtInt(k.produccionTotal)}<span class="unit">u.</span></div>
-      <p class="kpi-sub">Unidades entregadas Ene–Jun</p>
+      <p class="kpi-sub">${fmtInt(k.turnosEjecutados)} turnos ejecutados · Ene–Jun</p>
     </div>`;
 }
 
@@ -946,29 +914,40 @@ function renderChartCumplimiento(rows){
   const ctx = document.getElementById('chartCumplimiento');
   if (chartCumplimiento) chartCumplimiento.destroy();
   chartCumplimiento = new Chart(ctx, {
-    type:'bar',
     data:{ labels: rows.map(r=>r.mes),
       datasets:[
-        { label:'A tiempo', data: rows.map(r=>r.aTiempo), backgroundColor:'#3C8C5C', stack:'s' },
-        { label:'Con atraso', data: rows.map(r=>r.tarde), backgroundColor:'#B0433C', stack:'s' }
+        { type:'bar', label:'A tiempo', data: rows.map(r=>r.aTiempo), backgroundColor:'#3C8C5C', stack:'s', yAxisID:'y' },
+        { type:'bar', label:'Con atraso', data: rows.map(r=>r.tarde), backgroundColor:'#B0433C', stack:'s', yAxisID:'y' },
+        { type:'line', label:'% a tiempo', data: rows.map(r=>r.pct), borderColor:'#2E6F86', backgroundColor:'#2E6F86',
+          yAxisID:'y1', tension:.25, pointRadius:4, borderWidth:2, spanGaps:true },
+        { type:'line', label:'Objetivo 95%', data: rows.map(()=>95), borderColor:'#C9852E', borderDash:[6,4],
+          pointRadius:0, borderWidth:1.5, yAxisID:'y1' }
       ]},
     options:{ responsive:true, plugins:{ legend:{ position:'bottom', labels:{boxWidth:12, font:{size:11}} } },
-      scales:{ x:{ stacked:true }, y:{ stacked:true, ticks:{ precision:0 } } } }
+      scales:{
+        x:{ stacked:true },
+        y:{ stacked:true, position:'left', ticks:{ precision:0 }, title:{display:true, text:'OF'} },
+        y1:{ position:'right', min:0, max:100, grid:{drawOnChartArea:false}, ticks:{ callback:v=>v+'%' } }
+      } }
   });
 }
 
-function renderChartUtilMensual(rows){
+function renderChartUtilCritico(rows){
   const ctx = document.getElementById('chartUtilMensual');
   if (chartUtilMensual) chartUtilMensual.destroy();
-  const values = rows.map(r=>round2(r.utilizacionProm*100));
+  const values = rows.map(r=>round2(r.util*100));
   const colors = values.map(v=>utilColor(v/100));
   chartUtilMensual = new Chart(ctx, {
     type:'bar',
     data:{ labels: rows.map(r=>r.mes), datasets:[
-      { label:'Utilización (%)', data: values, backgroundColor: colors, borderRadius:4 },
+      { label:'Utilización recurso crítico (%)', data: values, backgroundColor: colors, borderRadius:4,
+        centros: rows.map(r=>r.centro) },
       { label:'Objetivo 85%', data: rows.map(()=>85), type:'line', borderColor:'#1B2027', borderDash:[6,4], pointRadius:0, borderWidth:1.5 }
     ]},
-    options:{ responsive:true, plugins:{ legend:{ position:'bottom', labels:{boxWidth:12, font:{size:11}} } },
+    options:{ responsive:true, plugins:{
+        legend:{ position:'bottom', labels:{boxWidth:12, font:{size:11}} },
+        tooltip:{ callbacks:{ afterLabel:(it)=> it.datasetIndex===0 ? 'Centro: '+rows[it.dataIndex].centro : '' } }
+      },
       scales:{ y:{ ticks:{ callback:v=>v+'%' } } } }
   });
 }
@@ -976,12 +955,17 @@ function renderChartUtilMensual(rows){
 function renderChartFamilia(rows){
   const ctx = document.getElementById('chartFamilia');
   if (chartFamilia) chartFamilia.destroy();
+  const colors = rows.map(r=> r.cumpl>=1 ? '#3C8C5C' : (r.cumpl>=0.8 ? '#C9852E' : '#B0433C'));
   chartFamilia = new Chart(ctx, {
     type:'bar',
     data:{ labels: rows.map(r=>r.familia), datasets:[
-      { label:'Unidades', data: rows.map(r=>r.cantidad), backgroundColor:'#2E6F86', borderRadius:4 }
+      { label:'Unidades', data: rows.map(r=>r.cantidad), backgroundColor:colors, borderRadius:4,
+        cumpl: rows.map(r=>Math.round(r.cumpl*100)) }
     ]},
-    options:{ indexAxis:'y', responsive:true, plugins:{ legend:{ display:false } },
+    options:{ indexAxis:'y', responsive:true, plugins:{
+        legend:{ display:false },
+        tooltip:{ callbacks:{ afterLabel:(it)=> 'Entrega a tiempo: '+Math.round(rows[it.dataIndex].cumpl*100)+'%' } }
+      },
       scales:{ x:{ ticks:{ precision:0 } } } }
   });
 }
@@ -1007,7 +991,7 @@ function refreshCerrado(){
   const r = calcMesCerrado();
   renderKpiCerrado(r.kpi);
   renderChartCumplimiento(r.cumplimientoPorMes);
-  renderChartUtilMensual(r.indicadoresMensuales);
+  renderChartUtilCritico(r.criticoPorMes);
   renderChartFamilia(r.produccionPorFamilia);
   renderHeatmap(r.heat);
 }
